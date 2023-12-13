@@ -123,3 +123,13 @@ COPYING file).
 
 Fabrice Bellard.
 ```
+
+### Headers over HTTPS example 
+```c
+#include "https://gist.githubusercontent.com/Noderyos/da68a16ac08be321da4974ab1d17047d/raw/7c84ff032030721b1ac638823c749861a3c23f77/hello.h"
+
+int main(void){
+  sayHello("Noderyos", 17);
+  return 0;
+}
+```
