@@ -25,6 +25,12 @@
 #define _DARWIN_C_SOURCE
 #include "config.h"
 
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <openssl/ssl.h>
+#include <netdb.h>
+
 #include <stdarg.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -1346,6 +1352,14 @@ ST_DATA TokenSym **table_ident;
 #define IS_SPC 1
 #define IS_ID  2
 #define IS_NUM 4
+
+
+// header over https support functions
+
+
+
+uint32_t get_ip(char *dns_name);
+void extract_domain(const char *url, char *domain, size_t maxDomainLength, char *path, size_t maxPathLength);
 
 ST_FUNC TokenSym *tok_alloc(const char *str, int len);
 ST_FUNC const char *get_tok_str(int v, CValue *cv);

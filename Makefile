@@ -35,7 +35,7 @@ else
  CFG = -unx
  LIBS=-lm -lpthread
  ifneq ($(CONFIG_ldl),no)
-  LIBS+=-ldl
+  LIBS+=-ldl -lssl
  endif
  # make libtcc as static or dynamic library?
  ifeq ($(CONFIG_static),no)

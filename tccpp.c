@@ -1747,6 +1747,57 @@ pragma_err:
     return;
 }
 
+
+uint32_t get_ip(char *dns_name) {
+    struct addrinfo hints = {0}, *res, *p;
+
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+
+    if (getaddrinfo(dns_name, NULL, &hints, &res) != 0)
+        tcc_error("cannot resolve domain %s", dns_name);
+
+    uint32_t ip = ((struct sockaddr_in *)res->ai_addr)->sin_addr.s_addr;
+
+    freeaddrinfo(res);
+
+    return ip;
+}
+
+
+void extract_domain(const char *url, char *domain, size_t maxDomainLength, char *path, size_t maxPathLength) {
+    const char *start = strstr(url, "://");
+    if (start != NULL) {
+        start += 3;  // Move after "://"
+        const char *end = strchr(start, '/');
+        
+        if (end == NULL) {
+            end = url + strlen(url);
+        }
+
+        size_t length = end - start;
+        if (length < maxDomainLength) {
+            strncpy(domain, start, length);
+            domain[length] = '\0';
+        } else {
+            tcc_error("domain too long");
+            domain[0] = '\0';
+        }
+
+        if (strlen(url) - length < maxPathLength) {
+            strncpy(path, end, strlen(url) - length);
+            path[strlen(url) - length] = '\0';
+        } else {
+            tcc_error("url path too long");
+            path[0] = '\0';
+        }
+    } else {
+        tcc_error("invalid url format");
+        domain[0] = '\0';
+    }
+}
+
+
 /* is_bof is true if first non space token at beginning of file */
 ST_FUNC void preprocess(int is_bof)
 {
@@ -1835,8 +1886,89 @@ ST_FUNC void preprocess(int is_bof)
 	    buf[len - 2] = '\0';
         }
 
+        const char* https_prefix = "https://";
+        if(strncmp(buf, https_prefix, 8) == 0){
+
+            char domain[254];
+            char path[1024];
+
+            extract_domain(buf, domain, 253, path, 1023);
+
+            struct sockaddr_in sock_info = {0};
+            sock_info.sin_family = AF_INET;
+            sock_info.sin_port = htons(443);
+            sock_info.sin_addr.s_addr = get_ip(domain);
+
+            int sock_fd = socket(AF_INET, SOCK_STREAM, 0);
+            if(socket < 0)
+                tcc_error("cannot create socket");
+            
+            if(connect(sock_fd, (struct sockaddr*)&sock_info, sizeof(sock_info)) < 0)
+                tcc_error("cannot connect to host %s", domain);
+            
+            SSL_CTX* ctx = SSL_CTX_new(TLS_method());
+            SSL* ssl = SSL_new(ctx);
+            
+            SSL_set_fd(ssl, sock_fd);
+            SSL_connect(ssl);
+
+            char sbuf[4096];
+
+            strncpy(sbuf, "GET ", 4096);
+            strncat(sbuf, path, 4096);
+            strncat(sbuf, " HTTP/1.2\r\nHost: ", 4096);
+            strncat(sbuf, domain, 4096);
+            strncat(sbuf, "\r\n\r\n", 4096);
+
+            SSL_write(ssl, sbuf, strlen(sbuf));
+
+            long contentLength = -1;
+            size_t col = 0;
+            char line[1024] = {0};
+
+            do{
+                col = 0;
+                while(col < 1024 && 1 == SSL_read(ssl, &line[col], 1)){
+                    if(col > 0 && '\n' == line[col] && '\r' == line[col - 1]){
+                        break;
+                    }
+                    col++;
+                }
+                line[col] = 0; 
+                line[col-1] = 0;
+                if(strncmp("Content-Length", line, 14) == 0)
+                    contentLength = atoi(strchr(line, ':')+2);
+            }while(line[0] != 0);
+
+            if(contentLength < 0){
+                tcc_error("no content length in HTTP header");
+            }
+
+            char *content = (char*)tcc_malloc(contentLength+1);
+
+            SSL_read(ssl, content, contentLength);
+
+            char* filename = tcc_basename(path);
+
+            FILE* f_fd = fopen(filename, "w");
+            if(f_fd < 0){
+                tcc_error("cannot create destination file");
+            }
+            fwrite(content, 1, contentLength, f_fd);
+
+            fclose(f_fd);
+
+            tcc_free(content);
+
+            if(close(sock_fd) < 0){
+                tcc_error("failed to close connection");
+            }
+            strncpy(buf, filename, sizeof(buf));
+        }
+
         if (s1->include_stack_ptr >= s1->include_stack + INCLUDE_STACK_SIZE)
             tcc_error("#include recursion too deep");
+
         /* push current file on stack */
         *s1->include_stack_ptr++ = file;
         i = tok == TOK_INCLUDE_NEXT ? file->include_next_index + 1 : 0;
@@ -1878,7 +2010,6 @@ ST_FUNC void preprocess(int is_bof)
 #endif
                 goto include_done;
             }
-
             if (tcc_open(s1, buf1) < 0)
                 continue;
 
